@@ -46,8 +46,8 @@ module "eks" {
   name               = local.cluster_name
   kubernetes_version = var.cluster_version
 
-  endpoint_public_access  = true
-  authentication_mode     = "API_AND_CONFIG_MAP"
+  endpoint_public_access                   = true
+  authentication_mode                      = "API_AND_CONFIG_MAP"
   enable_cluster_creator_admin_permissions = true
 
   vpc_id                   = module.vpc.vpc_id
