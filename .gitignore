@@ -1,0 +1,58 @@
+# -------------------------
+# macOS
+# -------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# -------------------------
+# Terraform
+# -------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+
+# Ignore local backend config
+backend.hcl
+
+# Terraform lock file (OPTIONAL)
+# Keep this if you want reproducibility
+# .terraform.lock.hcl
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+
+# -------------------------
+# VS Code
+# -------------------------
+.vscode/
+
+# -------------------------
+# IntelliJ / JetBrains
+# -------------------------
+.idea/
+*.iml
+
+# -------------------------
+# Python (if using scripts)
+# -------------------------
+__pycache__/
+*.pyc
+.venv/
+
+# -------------------------
+# OS files
+# -------------------------
+Thumbs.db
+
+# -------------------------
+# Misc temp
+# -------------------------
+*.tmp
+*.swp
