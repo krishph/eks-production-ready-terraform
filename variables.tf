@@ -81,3 +81,15 @@ variable "platform_admin_principal_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "aws_region" {
+  default = "us-east-1"
+}
+
+variable "environment" {
+  default = "dev"
+}
+
+variable "project_name" {
+  default = "eks-starter"
+}

@@ -60,7 +60,7 @@ jobs:
 
       - name: Terraform Plan
         if: github.event.inputs.action == 'plan'
-        run: terraform plan -var-file=terraform.tfvars -out=tfplan
+        run: terraform plan -out=tfplan
 
       - name: Upload Plan Artifact
         if: github.event.inputs.action == 'plan'
