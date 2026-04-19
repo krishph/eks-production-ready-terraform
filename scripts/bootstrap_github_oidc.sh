@@ -43,9 +43,27 @@ OIDC_URL="https://token.actions.githubusercontent.com"
 OIDC_HOST="token.actions.githubusercontent.com"
 OIDC_PROVIDER_ARN="arn:aws:iam::${ACCOUNT_ID}:oidc-provider/${OIDC_HOST}"
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+POLICY_NAME="${ROLE_NAME}-policy"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Fetch the current TLS thumbprint from GitHub's OIDC endpoint rather than
+# hardcoding it — the hardcoded value silently breaks when GitHub rotates certs.
+fetch_oidc_thumbprint() {
+  echo "Fetching current GitHub OIDC TLS thumbprint..."
+  THUMBPRINT=$(echo | openssl s_client \
+    -servername "$OIDC_HOST" \
+    -connect "${OIDC_HOST}:443" 2>/dev/null \
+    | openssl x509 -fingerprint -noout -sha1 \
+    | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+
+  if [[ -z "$THUMBPRINT" ]]; then
+    echo "ERROR: Failed to fetch OIDC thumbprint from ${OIDC_HOST}" >&2
+    exit 1
+  fi
+  echo "Thumbprint: $THUMBPRINT"
+}
 
 ensure_state_backend() {
   if aws s3api head-bucket --bucket "$TF_STATE_BUCKET" 2>/dev/null; then
@@ -96,7 +114,211 @@ ensure_oidc_provider() {
     aws iam create-open-id-connect-provider \
       --url "$OIDC_URL" \
       --client-id-list sts.amazonaws.com \
-      --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1 >/dev/null
+      --thumbprint-list "$THUMBPRINT" >/dev/null
+  fi
+}
+
+create_least_privilege_policy() {
+  cat > "$TMP_DIR/iam-policy.json" <<JSON
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EKS",
+      "Effect": "Allow",
+      "Action": ["eks:*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AllocateAddress",
+        "ec2:AssociateRouteTable",
+        "ec2:AttachInternetGateway",
+        "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:CreateInternetGateway",
+        "ec2:CreateNatGateway",
+        "ec2:CreateRoute",
+        "ec2:CreateRouteTable",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateSubnet",
+        "ec2:CreateTags",
+        "ec2:CreateVpc",
+        "ec2:DeleteInternetGateway",
+        "ec2:DeleteNatGateway",
+        "ec2:DeleteRoute",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVpc",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeInternetGateways",
+        "ec2:DescribeLaunchTemplateVersions",
+        "ec2:DescribeLaunchTemplates",
+        "ec2:DescribeNatGateways",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags",
+        "ec2:DescribeVpcAttribute",
+        "ec2:DescribeVpcs",
+        "ec2:DetachInternetGateway",
+        "ec2:DisassociateAddress",
+        "ec2:DisassociateRouteTable",
+        "ec2:ModifySubnetAttribute",
+        "ec2:ModifyVpcAttribute",
+        "ec2:ReleaseAddress",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:CreateLaunchTemplate",
+        "ec2:DeleteLaunchTemplate",
+        "ec2:RunInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IAM",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AddRoleToInstanceProfile",
+        "iam:AttachRolePolicy",
+        "iam:CreateInstanceProfile",
+        "iam:CreateOpenIDConnectProvider",
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:CreateRole",
+        "iam:DeleteInstanceProfile",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:GetInstanceProfile",
+        "iam:GetOpenIDConnectProvider",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:ListPolicyVersions",
+        "iam:ListRolePolicies",
+        "iam:PassRole",
+        "iam:PutRolePolicy",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:TagInstanceProfile",
+        "iam:TagOpenIDConnectProvider",
+        "iam:TagPolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TerraformStateBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${TF_STATE_BUCKET}",
+        "arn:aws:s3:::${TF_STATE_BUCKET}/*"
+      ]
+    },
+    {
+      "Sid": "TerraformStateLock",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DeleteItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem"
+      ],
+      "Resource": "arn:aws:dynamodb:${AWS_REGION}:${ACCOUNT_ID}:table/${TF_LOCK_TABLE}"
+    },
+    {
+      "Sid": "KMS",
+      "Effect": "Allow",
+      "Action": [
+        "kms:CreateAlias",
+        "kms:CreateKey",
+        "kms:DeleteAlias",
+        "kms:DescribeKey",
+        "kms:EnableKeyRotation",
+        "kms:GetKeyPolicy",
+        "kms:GetKeyRotationStatus",
+        "kms:ListAliases",
+        "kms:ListResourceTags",
+        "kms:PutKeyPolicy",
+        "kms:ScheduleKeyDeletion",
+        "kms:TagResource",
+        "kms:UntagResource",
+        "kms:UpdateKeyDescription"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DeleteRetentionPolicy",
+        "logs:DescribeLogGroups",
+        "logs:ListTagsLogGroup",
+        "logs:ListTagsForResource",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AutoScaling",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:CreateAutoScalingGroup",
+        "autoscaling:DeleteAutoScalingGroup",
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:DescribeScalingActivities",
+        "autoscaling:UpdateAutoScalingGroup"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+JSON
+
+  if aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" >/dev/null 2>&1; then
+    echo "Updating existing IAM policy: $POLICY_NAME"
+    # Delete old non-default versions to stay within the 5-version limit
+    OLD_VERSIONS=$(aws iam list-policy-versions \
+      --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" \
+      --query 'Versions[?!IsDefaultVersion].VersionId' --output text)
+    for v in $OLD_VERSIONS; do
+      aws iam delete-policy-version \
+        --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" \
+        --version-id "$v" >/dev/null
+    done
+    aws iam create-policy-version \
+      --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" \
+      --policy-document "file://$TMP_DIR/iam-policy.json" \
+      --set-as-default >/dev/null
+  else
+    echo "Creating least-privilege IAM policy: $POLICY_NAME"
+    aws iam create-policy \
+      --policy-name "$POLICY_NAME" \
+      --policy-document "file://$TMP_DIR/iam-policy.json" >/dev/null
   fi
 }
 
@@ -140,14 +362,16 @@ JSON
       --assume-role-policy-document "file://$TMP_DIR/trust-policy.json" >/dev/null
   fi
 
-  echo "Attaching AdministratorAccess for fast testing"
+  echo "Attaching least-privilege policy to role: $ROLE_NAME"
   aws iam attach-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/AdministratorAccess >/dev/null
+    --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}" >/dev/null
 }
 
+fetch_oidc_thumbprint
 ensure_state_backend
 ensure_oidc_provider
+create_least_privilege_policy
 create_or_update_role
 
 cat <<OUTPUT

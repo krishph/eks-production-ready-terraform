@@ -47,15 +47,27 @@ variable "private_subnets" {
 }
 
 variable "single_nat_gateway" {
-  description = "Whether to use a single NAT gateway to reduce cost"
+  description = "Use a single NAT gateway (NOT recommended for production — single point of failure)"
+  type        = bool
+  default     = false
+}
+
+variable "endpoint_public_access" {
+  description = "Enable public access to the EKS API server endpoint"
   type        = bool
   default     = true
 }
 
-variable "node_instance_types" {
-  description = "Instance types for managed node group"
+variable "endpoint_public_access_cidrs" {
+  description = "CIDRs allowed to reach the public EKS API endpoint. Restrict to your VPN/office IPs in production."
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["0.0.0.0/0"]
+}
+
+variable "node_instance_types" {
+  description = "Instance types for managed node group. Use non-burstable types (m6i, m7i) for production."
+  type        = list(string)
+  default     = ["m6i.large"]
 }
 
 variable "node_desired_size" {
@@ -77,7 +89,7 @@ variable "node_max_size" {
 }
 
 variable "platform_admin_principal_arns" {
-  description = "IAM principal ARNs to grant cluster admin access through EKS access entries"
+  description = "IAM principal ARNs to grant cluster admin access via EKS access entries. Must be non-empty when enable_cluster_creator_admin_permissions is false."
   type        = list(string)
   default     = []
 }

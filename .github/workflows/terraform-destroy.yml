@@ -2,6 +2,11 @@ name: Terraform Destroy
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: "Type DESTROY to confirm you want to permanently delete all infrastructure"
+        required: true
+        default: ""
 
 jobs:
   destroy:
@@ -16,6 +21,13 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
 
     steps:
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "Confirmation failed. You must type exactly: DESTROY"
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v5
 
