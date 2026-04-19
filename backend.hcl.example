@@ -1,0 +1,5 @@
+bucket         = "YOUR_UNIQUE_TF_STATE_BUCKET"
+key            = "envs/dev/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "terraform-locks"
+encrypt        = true
