@@ -2,8 +2,6 @@ name: Terraform Destroy
 
 on:
   workflow_dispatch:
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   destroy:
@@ -29,7 +27,7 @@ jobs:
           fi
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v5.0.0
         with:
           role-to-assume: ${{ vars.IAM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
